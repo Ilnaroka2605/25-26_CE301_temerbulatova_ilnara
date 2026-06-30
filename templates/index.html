@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AURA</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style2.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/tokyo-night-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script defer src="{{ url_for('static', filename='js/script.js') }}"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <div class="layout">
+    <!-- Main Chat Area -->
+    <main class="chat-area">
+      <header class="chat-header">
+        <h1>AURA</h1>
+        <button id="toggleSidebar" class="toggle-btn">☰</button>
+      </header>
+      <div id="chatbox" class="chatbox">
+        <div class="bot message">
+          <div id="greeting" class="greeting">
+            <div class="greeting-logo">✦</div>
+
+            <h2 class="greeting-title">How can I help you?</h2>
+            <p class="greeting-subtitle">Ask me anything — I’m here to assist.</p>
+
+            <div class="greeting-cards">
+              <button class="bubble" data-prompt="What is weather in ...">
+                What is weather in ...
+              </button>
+              <button class="bubble" data-prompt="Write an email for me">
+                Write an email for me
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <button id="stopBtn" class="input-btn hidden" style="color: #f88;">✕</button>
+      <div class="input-area">
+        <button id="voice" class="input-btn">🎙️</button>
+        <input id="input" type="text" placeholder="Type your message..." autocomplete="off">
+        <button id="send" class="input-btn send-btn">➤</button>
+      </div>
+      <div class="ai-disclaimer">
+        Aura can make mistakes. Verify important information.
+      </div>
+    </main>
+
+    <aside id="sidebar" class="sidebar ">
+
+      <div class="sidebar-header">
+        <h2>Account</h2>
+      </div>
+      
+      <!-- User Account -->
+      <div class="user-account" id="userAccountBtn">
+        <div class="avatar" id ="userAvatar">👤</div>
+        <div class="user-info">
+          <strong id="userName">Guest User</strong><br>
+          <small id="userStatus">Not connected</small>
+        </div>
+
+      <!-- Bottom account actions -->
+      <div class="sidebar-bottom-menu">
+        <button id="accountMenuBtn" class="account-menu-btn" type="button" aria-label="Account menu">
+          ⋮
+        </button>
+
+        <div id="accountMenu" class="account-menu hidden">
+          <button id="accountLoginBtn" type="button">🔐 Log in</button>
+          <button id="accountSettingsBtn" type="button">⚙️ Settings</button>
+          <button id="accountLogoutBtn" type="button" class="danger hidden">🚪 Log out</button>
+        </div>
+      </div>
+
+      </div>
+
+      <!-- Menu -->
+      <div class="sidebar-menu">
+        <button id="newChatBtn"> New Chat</button>
+        <button id="savedMsgBtn"> Saved Messages</button>
+        <button id="calendarBtn">  Calendar </button>
+        <button id="emailBtn">  Email </button>
+        <button id="telegramBtn">  Telegram  </button>
+      </div>
+
+      <!-- Chat History Header -->
+      <div class="chat-history-header">
+        Chat History
+      </div>
+
+
+      <!-- Chat History List -->
+      <ul id="chatHistory" class="chat-list">
+        <!-- History items will be inserted here dynamically -->
+      </ul>
+
+    </aside>
+  </div>
+
+  <div id="authModal" class="auth-modal hidden">
+  <div class="auth-box">
+
+    <button id="closeAuth">✖</button>
+
+    <h2>Log In</h2>
+
+    <div id="g_id_signin" class="google-btn"></div>
+
+  </div>
+</div>
+<script>
+  function handleCredentialResponse(response) {
+    // Send the Google JWT to your Flask backend
+    fetch('/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: response.credential })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if(data.success){
+        document.getElementById("authModal").classList.add("hidden");
+        if (window.__setLoggedInUI) {
+          window.__setLoggedInUI(data.name);
+        } else {
+          document.getElementById("userName").innerText = data.name;
+          document.getElementById("userStatus").innerText = "Connected";
+        }
+        alert(`Logged in as ${data.name}`);
+      } else {
+        alert("Google login failed");
+      }
+    });
+  }
+
+  window.onload = function() {
+    google.accounts.id.initialize({
+      client_id: "317910301204-v7l5skkfrhsi6avhm7lugs2hjdv1il7d.apps.googleusercontent.com",
+      callback: handleCredentialResponse
+    });
+
+    google.accounts.id.renderButton(
+      document.getElementById("g_id_signin"),
+      { theme: "outline", size: "large", width: 250 }
+    );
+
+    // Optional: auto prompt for Google login
+    google.accounts.id.prompt();
+  }
+</script>
+</body>
+</html>

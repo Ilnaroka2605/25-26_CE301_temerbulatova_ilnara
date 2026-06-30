@@ -1,0 +1,7 @@
+Flask==3.1.2
+Flask-Login==0.6.3
+python-dotenv==1.2.1
+google-genai==1.60.0
+google-auth==2.48.0
+requests==2.32.5
+python-telegram-bot==20.7
