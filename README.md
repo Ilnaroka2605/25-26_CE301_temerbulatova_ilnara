@@ -32,20 +32,13 @@ A Flask-based conversational AI assistant ("AURA") powered by Google's Gemini mo
    source venv/bin/activate   # Windows: venv\Scripts\activate
    pip install -r requirements.txt
    ```
-
-2. Copy `.env.example` to `.env` and fill in your own keys:
-   ```bash
-   cp .env.example .env
-   ```
-   You'll need: a Gemini API key, a Google OAuth Client ID, a Flask secret key, a WeatherAPI key, a NewsAPI key, and (optionally) a Telegram bot token.
-
-3. Run the web app:
+2. Run the web app:
    ```bash
    python app.py
    ```
    Visit `http://127.0.0.1:5000`.
 
-4. (Optional) Run the Telegram bot in a separate terminal, with the Flask app already running:
+3. Run the Telegram bot in a separate terminal, with the Flask app already running:
    ```bash
    python telegram_bot.py
    ```
