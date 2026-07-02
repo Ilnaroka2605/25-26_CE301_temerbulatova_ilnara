@@ -29,7 +29,7 @@ A Flask-based conversational AI assistant ("AURA") powered by Google's Gemini mo
 1. Create a virtual environment and install dependencies:
    ```bash
    python -m venv venv
-   source venv/bin/activate   # Windows: venv\Scripts\activate
+   venv\Scripts\activate
    pip install -r requirements.txt
    ```
 2. Run the web app:
