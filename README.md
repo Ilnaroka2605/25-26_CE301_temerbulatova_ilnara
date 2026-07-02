@@ -21,7 +21,7 @@ A Flask-based conversational AI assistant ("AURA") powered by Google's Gemini mo
 ├── static/
 │   ├── css/style2.css
 │   └── js/script.js
-└── .env.example
+└── .env
 ```
 
 ## Setup
