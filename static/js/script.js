@@ -1,8 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
   // GET REFERENCES TO HTML ELEMENTS
-  // document.getElementById() finds an element by its id=""
-  // attribute in index.html. We store them in variables so
-  // we don't have to search the DOM every time we use them.
   const chatbox = document.getElementById("chatbox");
   let greeting = document.getElementById("greeting");
   const input = document.getElementById("input");
@@ -17,6 +14,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const calendarBtn = document.getElementById("calendarBtn");
   const emailBtn = document.getElementById("emailBtn");
 
+  // Wow-feature elements
+  const voiceToggle = document.getElementById("voiceToggle");
+  const attachBtn = document.getElementById("attachBtn");
+  const fileInput = document.getElementById("fileInput");
+  const attachmentPreview = document.getElementById("attachmentPreview");
+  const slashMenu = document.getElementById("slashMenu");
+
   // Auth / account menu
   const authModal = document.getElementById("authModal");
   const closeAuth = document.getElementById("closeAuth");
@@ -27,27 +31,293 @@ document.addEventListener("DOMContentLoaded", () => {
   const accountLoginBtn = document.getElementById("accountLoginBtn");
   const accountSettingsBtn = document.getElementById("accountSettingsBtn");
   const accountLogoutBtn = document.getElementById("accountLogoutBtn");
-  
+
   // Chat history by conversations
-  // We store all chats in the browser's localStorage so they
-  // survive page refreshes. localStorage only holds strings,
-  // so we JSON.stringify() to save and JSON.parse() to load.
-  // chats = array of chat objects (each has id, title, messages[])
-  // currentChatId = which chat is open right now
-  // currentView = "chat" or "saved" — controls what's shown
   let chats = JSON.parse(localStorage.getItem("auraChats")) || [];
   let currentChatId = null;
   let currentView = "chat";
 
-  // Generates a unique ID for each chat session.
-  // Uses current timestamp + a random number to avoid collisions
-  // even if two chats are created in the same millisecond.
+  // Wow-feature state
+  let voiceEnabled = localStorage.getItem("auraVoiceEnabled") === "true";
+  let pendingAttachment = null; // { data: base64, mime_type, name, previewUrl }
+
+  // ----------------------------------------------------
+  // Emotion-reactive orb: a lightweight client-side heuristic.
+  // This is NOT real sentiment analysis — just keyword matching
+  // to give the orb a "mood" that roughly tracks the conversation.
+  // Good enough for ambiance; not meant to be clinically accurate.
+  // ----------------------------------------------------
+  const WARM_WORDS = ["great", "awesome", "love", "amazing", "congrat", "yay", "exciting", "happy", "wonderful", "🎉", "!"];
+  const SERIOUS_WORDS = ["sorry", "error", "problem", "issue", "sad", "unfortunately", "difficult", "worried", "concern", "fail", "died", "death", "urgent"];
+
+  function detectMood(text) {
+    const lower = text.toLowerCase();
+    let warmScore = 0;
+    let seriousScore = 0;
+    WARM_WORDS.forEach(w => { if (lower.includes(w)) warmScore++; });
+    SERIOUS_WORDS.forEach(w => { if (lower.includes(w)) seriousScore++; });
+
+    if (seriousScore > warmScore && seriousScore > 0) return "serious";
+    if (warmScore > 0) return "warm";
+    return "calm";
+  }
+
+  function applyMood(text) {
+    const mood = detectMood(text);
+    document.body.dataset.mood = mood;
+  }
+
+  // ----------------------------------------------------
+  // Voice replies (text-to-speech). Strips markdown syntax so
+  // the assistant doesn't read out asterisks, hashes, etc.
+  // ----------------------------------------------------
+  function speakText(text) {
+    if (!("speechSynthesis" in window)) return;
+    const clean = text
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/[*_#`]/g, "")
+      .replace(/\[(.*?)\]\(.*?\)/g, "$1")
+      .trim();
+    if (!clean) return;
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1.0;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function updateVoiceToggleUI() {
+    if (!voiceToggle) return;
+    voiceToggle.textContent = voiceEnabled ? "🔊" : "🔇";
+    voiceToggle.classList.toggle("active", voiceEnabled);
+  }
+
+  voiceToggle?.addEventListener("click", () => {
+    voiceEnabled = !voiceEnabled;
+    localStorage.setItem("auraVoiceEnabled", voiceEnabled);
+    updateVoiceToggleUI();
+    if (!voiceEnabled) window.speechSynthesis?.cancel();
+  });
+  updateVoiceToggleUI();
+
+  // ----------------------------------------------------
+  // Slash commands
+  // ----------------------------------------------------
+  const SLASH_COMMANDS = [
+    { cmd: "/summarize", desc: "Summarize the text you paste after this command", template: "/summarize " },
+    { cmd: "/translate", desc: "Translate text — e.g. /translate to Russian: hello", template: "/translate to " },
+    { cmd: "/remind", desc: "Set a browser reminder — e.g. /remind in 10 minutes: stretch", template: "/remind in " },
+    { cmd: "/image", desc: "Generate an image from a description", template: "/image " }
+  ];
+
+  let slashSelectedIndex = 0;
+
+  function renderSlashMenu(filter) {
+    const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(filter));
+    if (!matches.length) {
+      slashMenu.classList.add("hidden");
+      return;
+    }
+    slashSelectedIndex = 0;
+    slashMenu.innerHTML = "";
+    matches.forEach((c, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      if (i === slashSelectedIndex) btn.classList.add("selected");
+      btn.innerHTML = `<span class="cmd-name">${c.cmd}</span><span class="cmd-desc">${c.desc}</span>`;
+      btn.addEventListener("click", () => {
+        input.value = c.template;
+        input.focus();
+        slashMenu.classList.add("hidden");
+      });
+      slashMenu.appendChild(btn);
+    });
+    slashMenu.classList.remove("hidden");
+  }
+
+  input?.addEventListener("input", () => {
+    const val = input.value;
+    if (val.startsWith("/") && !val.includes(" ")) {
+      renderSlashMenu(val);
+    } else {
+      slashMenu.classList.add("hidden");
+    }
+  });
+
+  // Parses a leading slash command out of the user's message.
+  // Returns { type: "summarize"|"translate"|"remind"|"image"|null, rest }
+  function parseSlashCommand(text) {
+    const lower = text.toLowerCase();
+    if (lower.startsWith("/summarize ")) return { type: "summarize", rest: text.slice(11).trim() };
+    if (lower.startsWith("/translate ")) return { type: "translate", rest: text.slice(11).trim() };
+    if (lower.startsWith("/remind ")) return { type: "remind", rest: text.slice(8).trim() };
+    if (lower.startsWith("/image ")) return { type: "image", rest: text.slice(7).trim() };
+    return { type: null, rest: text };
+  }
+
+  // Very lightweight parser for "/remind in <duration>: <message>"
+  function handleRemindCommand(rest) {
+    const match = rest.match(/^(\d+)\s*(second|minute|hour)s?\s*:\s*(.+)$/i);
+    if (!match) {
+      appendMessage("bot", "To set a reminder, use the format: `/remind in 10 minutes: stretch your legs`");
+      return;
+    }
+    const [, amountStr, unit, message] = match;
+    const amount = parseInt(amountStr, 10);
+    const multiplier = unit.toLowerCase().startsWith("hour") ? 3600000 : unit.toLowerCase().startsWith("minute") ? 60000 : 1000;
+    const delay = amount * multiplier;
+
+    if ("Notification" in window && Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+
+    setTimeout(() => {
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification("AURA reminder", { body: message });
+      } else {
+        alert(`⏰ AURA reminder: ${message}`);
+      }
+    }, delay);
+
+    appendMessage("bot", `⏰ Got it — I'll remind you in ${amount} ${unit}${amount > 1 ? "s" : ""}: "${message}". Keep this tab open for the reminder to fire.`);
+  }
+
+  async function handleImageCommand(prompt) {
+    appendMessage("user", `/image ${prompt}`);
+    const typing = showTypingIndicator();
+
+    try {
+      const response = await fetch("/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await response.json();
+      typing.remove();
+
+      if (data.image) {
+        appendMessage("bot", data.text || "Here's what I generated:");
+        const imgDiv = document.createElement("div");
+        imgDiv.className = "bot message";
+        imgDiv.innerHTML = `
+          <div class="msg-avatar aura-orb" aria-hidden="true"></div>
+          <div class="bubble msg-attachment">
+            <img src="data:${data.mime_type};base64,${data.image}" alt="Generated image">
+          </div>
+        `;
+        chatbox.appendChild(imgDiv);
+        chatbox.scrollTop = chatbox.scrollHeight;
+      } else {
+        appendMessage("bot", `⚠️ ${data.error || "Couldn't generate an image."}`);
+      }
+    } catch {
+      typing.remove();
+      appendMessage("bot", "⚠️ Error: Unable to reach the image generation endpoint.");
+    }
+  }
+
+  // ----------------------------------------------------
+  // Drag & drop / file attachment
+  // ----------------------------------------------------
+  function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function setAttachment(file) {
+    if (!file) return;
+    const base64 = await readFileAsBase64(file);
+    const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+
+    pendingAttachment = { data: base64, mime_type: file.type || "application/octet-stream", name: file.name, previewUrl };
+
+    attachmentPreview.innerHTML = "";
+    if (previewUrl) {
+      const img = document.createElement("img");
+      img.src = previewUrl;
+      attachmentPreview.appendChild(img);
+    }
+    const label = document.createElement("span");
+    label.textContent = file.name;
+    attachmentPreview.appendChild(label);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "remove-attachment";
+    removeBtn.textContent = "✕";
+    removeBtn.onclick = () => clearAttachment();
+    attachmentPreview.appendChild(removeBtn);
+
+    attachmentPreview.classList.remove("hidden");
+  }
+
+  function clearAttachment() {
+    pendingAttachment = null;
+    attachmentPreview.classList.add("hidden");
+    attachmentPreview.innerHTML = "";
+    fileInput.value = "";
+  }
+
+  attachBtn?.addEventListener("click", () => fileInput.click());
+  fileInput?.addEventListener("change", (e) => setAttachment(e.target.files[0]));
+
+  chatbox?.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    chatbox.classList.add("drag-over");
+  });
+  chatbox?.addEventListener("dragleave", () => chatbox.classList.remove("drag-over"));
+  chatbox?.addEventListener("drop", (e) => {
+    e.preventDefault();
+    chatbox.classList.remove("drag-over");
+    const file = e.dataTransfer.files[0];
+    if (file) setAttachment(file);
+  });
+
+  function showTypingIndicator() {
+    const typing = document.createElement("div");
+    typing.className = "bot message";
+    typing.id = "typing-indicator";
+    typing.innerHTML = `
+      <div class="mini-orb" aria-hidden="true"></div>
+      <div class="typing-bubble">AURA is thinking…</div>
+    `;
+    chatbox.appendChild(typing);
+    chatbox.scrollTop = chatbox.scrollHeight;
+    return typing;
+  }
+
+  // ----------------------------------------------------
+  // Follow-up suggestion chips
+  // ----------------------------------------------------
+  function renderSuggestionChips(suggestions) {
+    if (!suggestions || !suggestions.length) return;
+
+    const wrap = document.createElement("div");
+    wrap.className = "suggestion-chips";
+
+    suggestions.forEach(s => {
+      const chip = document.createElement("button");
+      chip.className = "suggestion-chip";
+      chip.type = "button";
+      chip.textContent = s;
+      chip.addEventListener("click", () => {
+        input.value = s;
+        sendMessage();
+      });
+      wrap.appendChild(chip);
+    });
+
+    chatbox.appendChild(wrap);
+    chatbox.scrollTop = chatbox.scrollHeight;
+  }
+
   function generateChatId() {
     return "chat_" + Date.now() + "_" + Math.floor(Math.random() * 10000);
   }
 
-  // Returns a blank chat object with an auto-generated ID.
-  // This is the structure every chat follows throughout the app.
   function getEmptyChat() {
     return {
       id: generateChatId(),
@@ -58,22 +328,14 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  // Saves the entire chats array to localStorage.
-  // Called after every change so data is never lost on refresh.
   function saveChatsToStorage() {
     localStorage.setItem("auraChats", JSON.stringify(chats));
   }
 
-  // Finds and returns the currently open chat object.
-  // Array.find() searches the chats array and returns the first match,
-  // or null if no chat matches the currentChatId.
   function getCurrentChat() {
     return chats.find(chat => chat.id === currentChatId) || null;
   }
 
-  // Guarantees there is always an active chat to write to.
-  // If no chat is selected (e.g. on first ever load), it creates one.
-  // unshift() adds it to the FRONT of the array so it appears at the top of the sidebar.
   function ensureCurrentChat() {
     let chat = getCurrentChat();
 
@@ -86,16 +348,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     return chat;
   }
-  // Trims the chat title to 30 characters for display in the sidebar.
-  // Adds "..." if the message was longer than 30 characters.
+
   function makeChatTitle(text) {
     if (!text) return "New Chat";
     return text.length > 30 ? text.slice(0, 30) + "..." : text;
   }
 
-  // Sets the sidebar title of the current chat to the user's first message.
-  // Only runs if the title is still "New Chat" or messages are few,
-  // so it doesn't overwrite a title that was already set.
   function updateCurrentChatTitle(firstUserMessage) {
     const chat = getCurrentChat();
     if (!chat) return;
@@ -107,7 +365,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderHistory();
     }
   }
-  
+
   function addMessageToCurrentChat(sender, text) {
     const chat = ensureCurrentChat();
 
@@ -117,10 +375,7 @@ document.addEventListener("DOMContentLoaded", () => {
     saveChatsToStorage();
     renderHistory();
   }
-  // Loads a specific chat by ID into the chatbox.
-  // Clears the current chatbox, then replays all messages
-  // by calling appendMessage() for each one.
-  // persist=false means don't re-save them
+
   function openChat(chatId) {
     const chat = chats.find(c => c.id === chatId);
     if (!chat) return;
@@ -139,30 +394,62 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Rebuilds the entire sidebar chat list from scratch each time.
-  // Sorted by most recently updated so newest chats appear first.
+  // ----------------------------------------------------
+  // History grouping: buckets chats into Today / Yesterday /
+  // Previous 7 Days / Older, the way most modern chat UIs do.
+  // ----------------------------------------------------
+  function getHistoryGroup(dateStr) {
+    const date = new Date(dateStr);
+    const now = new Date();
+
+    const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const today = startOfDay(now);
+    const chatDay = startOfDay(date);
+    const diffDays = Math.round((today - chatDay) / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) return "Today";
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays <= 7) return "Previous 7 Days";
+    return "Older";
+  }
+
   function renderHistory() {
     chatHistoryList.innerHTML = "";
 
     if (!chats.length) {
-      // Show placeholder text if there are no chats yet
       const li = document.createElement("li");
       li.textContent = "No chats yet";
       li.style.opacity = "0.7";
       chatHistoryList.appendChild(li);
       return;
     }
-    // Sort chats: most recently updated appears first in sidebar
-    chats
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-      .forEach((chat) => {
+
+    const sorted = [...chats].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    const groupOrder = ["Today", "Yesterday", "Previous 7 Days", "Older"];
+    const grouped = {};
+    sorted.forEach(chat => {
+      const group = getHistoryGroup(chat.updatedAt);
+      if (!grouped[group]) grouped[group] = [];
+      grouped[group].push(chat);
+    });
+
+    groupOrder.forEach(groupName => {
+      const chatsInGroup = grouped[groupName];
+      if (!chatsInGroup || !chatsInGroup.length) return;
+
+      const label = document.createElement("li");
+      label.className = "history-group-label";
+      label.textContent = groupName;
+      label.style.listStyle = "none";
+      chatHistoryList.appendChild(label);
+
+      chatsInGroup.forEach(chat => {
         const li = document.createElement("li");
         li.className = "chat-history-item";
-        // Highlight the currently open chat in the sidebar
         if (chat.id === currentChatId) {
           li.classList.add("active-chat");
         }
-        // The clickable chat title text
+
         const title = document.createElement("span");
         title.className = "chat-history-title";
         title.textContent = chat.title || "Untitled Chat";
@@ -171,18 +458,18 @@ document.addEventListener("DOMContentLoaded", () => {
           openChat(chat.id);
           renderHistory();
         });
-        // Container for the ⋮ options button and its dropdown
+
         const actions = document.createElement("div");
         actions.className = "chat-history-actions";
-        // ⋮ three-dot button that opens the per-chat dropdown menu
+
         const menuBtn = document.createElement("button");
         menuBtn.className = "chat-options-btn";
         menuBtn.type = "button";
         menuBtn.textContent = "⋮";
-        // The dropdown menu that appears when ⋮ is clicked
+
         const menu = document.createElement("div");
         menu.className = "chat-options-menu hidden";
-        // "Delete chat" button inside the dropdown
+
         const deleteBtn = document.createElement("button");
         deleteBtn.type = "button";
         deleteBtn.className = "danger";
@@ -196,7 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
             menu.classList.remove("hidden");
           }
         });
-        // Delete this chat when the delete button is clicked
+
         deleteBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           deleteChat(chat.id);
@@ -213,11 +500,9 @@ document.addEventListener("DOMContentLoaded", () => {
         li.appendChild(actions);
         chatHistoryList.appendChild(li);
       });
+    });
   }
 
-  // Removes a chat from the chats array and updates localStorage.
-  // If the deleted chat was the currently open one, either switches
-  // to the next available chat or starts a fresh new one.
   function deleteChat(chatId) {
     chats = chats.filter(chat => chat.id !== chatId);
     localStorage.setItem("auraChats", JSON.stringify(chats));
@@ -234,23 +519,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     renderHistory();
   }
-  // Closes all per-chat dropdown menus by adding the "hidden" class.
-  // Called whenever the user clicks anywhere outside a menu.
+
   function closeAllChatMenus() {
     document.querySelectorAll(".chat-options-menu").forEach(menu => {
       menu.classList.add("hidden");
     });
   }
-  // The welcome screen shown when a chat has no messages yet.
-  // It's injected as HTML so it reappears after "New Chat" is clicked.
+
   function showEmptyChatScreen() {
     chatbox.innerHTML = `
       <div class="bot message">
         <div id="greeting" class="greeting">
-          <div class="greeting-logo">✦</div>
+          <div class="aura-orb" aria-hidden="true"></div>
 
           <h2 class="greeting-title">How can I help you?</h2>
-          <p class="greeting-subtitle">Ask me anything — I’m here to assist.</p>
+          <p class="greeting-subtitle">Ask me anything — I'm here to assist.</p>
 
           <div class="greeting-cards">
             <button class="bubble" data-prompt="Write an email for me">
@@ -266,8 +549,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     attachGreetingEvents();
   }
-  // Creates a new empty chat, adds it to the front of the list
-  // saves it, re-renders the sidebar, and shows the greeting screen.
+
   function startNewChat() {
     const newChat = getEmptyChat();
     chats.unshift(newChat);
@@ -278,29 +560,48 @@ document.addEventListener("DOMContentLoaded", () => {
     renderHistory();
     showEmptyChatScreen();
   }
+
+  // Returns the initial to show in the user's avatar circle
+  function getUserInitial() {
+    const name = document.getElementById("userName")?.textContent?.trim();
+    if (!name || name === "Guest User") return "U";
+    return name.charAt(0).toUpperCase();
+  }
+
   // appendMessage() is the core function for showing any message
   // in the chatbox — used for both user and bot messages.
-  function appendMessage(sender, text, persist = true) {
+  function appendMessage(sender, text, persist = true, attachmentInfo = null) {
     const messageDiv = document.createElement("div");
     messageDiv.className = `${sender} message`;
 
+    // Avatar glyph — orb for AURA, initials for the user
+    const avatar = document.createElement("div");
+    avatar.className = "msg-avatar";
+    avatar.textContent = sender === "bot" ? "" : getUserInitial();
+    if (sender === "bot") avatar.classList.add("aura-orb");
+
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.innerHTML = marked.parse(text);
+
+    if (attachmentInfo && attachmentInfo.previewUrl) {
+      const attWrap = document.createElement("div");
+      attWrap.className = "msg-attachment";
+      const img = document.createElement("img");
+      img.src = attachmentInfo.previewUrl;
+      attWrap.appendChild(img);
+      bubble.appendChild(attWrap);
+    }
+
+    const textDiv = document.createElement("div");
+    textDiv.innerHTML = marked.parse(text);
+    bubble.appendChild(textDiv);
 
     bubble.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
 
     bubble.querySelectorAll("pre").forEach(pre => {
       const btn = document.createElement("button");
+      btn.className = "copy-btn";
       btn.textContent = "Copy";
-      btn.style.cssText = `
-        position: absolute; top: 8px; right: 8px;
-        font-size: 11px; padding: 3px 10px;
-        background: rgba(255,255,255,0.1);
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 5px; color: #fff;
-        cursor: pointer;
-      `;
       btn.onclick = () => {
         navigator.clipboard.writeText(pre.querySelector("code").innerText);
         btn.textContent = "Copied!";
@@ -309,19 +610,28 @@ document.addEventListener("DOMContentLoaded", () => {
       pre.style.position = "relative";
       pre.appendChild(btn);
     });
-    // Only bot messages get a "save" button users don't need to save their own messages
+
+    // Bot messages get "Save" and "Listen" actions
     if (sender === "bot") {
+      const actions = document.createElement("div");
+      actions.className = "bubble-actions";
+
       const saveBtn = document.createElement("button");
       saveBtn.className = "save-btn";
-      saveBtn.textContent = "save";
+      saveBtn.textContent = "Save";
+      saveBtn.addEventListener("click", () => saveMessage(text));
+      actions.appendChild(saveBtn);
 
-      saveBtn.addEventListener("click", () => {
-        saveMessage(text);
-      });
+      const listenBtn = document.createElement("button");
+      listenBtn.className = "save-btn";
+      listenBtn.textContent = "🔊 Listen";
+      listenBtn.addEventListener("click", () => speakText(text));
+      actions.appendChild(listenBtn);
 
-      bubble.appendChild(saveBtn);
+      bubble.appendChild(actions);
     }
 
+    messageDiv.appendChild(avatar);
     messageDiv.appendChild(bubble);
     chatbox.appendChild(messageDiv);
     chatbox.scrollTop = chatbox.scrollHeight;
@@ -330,51 +640,76 @@ document.addEventListener("DOMContentLoaded", () => {
       addMessageToCurrentChat(sender, text);
     }
   }
+
   // The main function — runs when user clicks send or presses Enter.
-  // It handles news requests separately from general AI chat.
   async function sendMessage() {
     const text = input.value.trim();
-    if (!text) return;
+    if (!text && !pendingAttachment) return;
     hideGreetingSmoothly();
+    slashMenu.classList.add("hidden");
+
+    // Route slash commands before anything else
+    const parsed = parseSlashCommand(text);
+
+    if (parsed.type === "remind") {
+      appendMessage("user", text);
+      input.value = "";
+      handleRemindCommand(parsed.rest);
+      return;
+    }
+
+    if (parsed.type === "image") {
+      input.value = "";
+      await handleImageCommand(parsed.rest);
+      return;
+    }
+
     ensureCurrentChat();
 
-    appendMessage("user", text);
+    // /summarize and /translate are just rewritten into a clearer
+    // instruction and sent through the normal chat pipeline.
+    let outgoingText = text;
+    if (parsed.type === "summarize") outgoingText = `Summarize the following:\n\n${parsed.rest}`;
+    if (parsed.type === "translate") outgoingText = `Translate the following: ${parsed.rest}`;
+
+    const attachmentToSend = pendingAttachment;
+    appendMessage("user", text, true, attachmentToSend);
     updateCurrentChatTitle(text);
     input.value = "";
+    clearAttachment();
 
-    // Show typing indicator
-    const typing = document.createElement("div");
-    typing.className = "bot message";
-    typing.id = "typing-indicator";
-    typing.innerHTML = `<div class="bubble" style="opacity:0.5; font-style:italic;">AURA is thinking...</div>`;
-    chatbox.appendChild(typing);
-    chatbox.scrollTop = chatbox.scrollHeight;
-    
-    // If user asks for news, check if the message contains the word "news"
-    if (text.toLowerCase().includes("news")) {
+    const typing = showTypingIndicator();
+
+    if (text.toLowerCase().includes("news") && !attachmentToSend) {
       const query = text.replace(/news/gi, "").trim() || "latest";
       const news = await fetchNews(query);
-      document.getElementById("typing-indicator")?.remove();
+      typing.remove();
       appendMessage("bot", news);
       return;
     }
 
-    // Get conversation history for memory
     const chat = getCurrentChat();
     const history = chat ? chat.messages.slice(-6) : [];
 
     try {
-      // fetch() sends an HTTP request — await pauses until the response arrives
+      const body = { message: outgoingText, history };
+      if (attachmentToSend) {
+        body.attachment = { data: attachmentToSend.data, mime_type: attachmentToSend.mime_type };
+      }
+
       const response = await fetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history })
+        body: JSON.stringify(body)
       });
       const data = await response.json();
-      document.getElementById("typing-indicator")?.remove();
+      typing.remove();
       appendMessage("bot", data.reply);
+      applyMood(data.reply);
+      if (voiceEnabled) speakText(data.reply);
+      renderSuggestionChips(data.suggestions);
     } catch {
-      document.getElementById("typing-indicator")?.remove();
+      typing.remove();
       appendMessage("bot", "⚠️ Error: Unable to connect to the server.");
     }
   }
@@ -394,7 +729,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Hide greeting smoothly
   function hideGreetingSmoothly() {
     greeting = document.getElementById("greeting");
     if (!greeting) return;
@@ -420,7 +754,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Send message
-  // Two ways to send a message: clicking the button or pressing Enter
   sendBtn.addEventListener("click", sendMessage);
 
   input.addEventListener("keypress", (e) => {
@@ -431,7 +764,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if ("webkitSpeechRecognition" in window) {
     const recognition = new webkitSpeechRecognition();
     recognition.lang = "en-US";
-    recognition.continuous = false; // stop after first pause
+    recognition.continuous = false;
 
     voiceBtn.onclick = () => recognition.start();
 
@@ -442,7 +775,18 @@ document.addEventListener("DOMContentLoaded", () => {
   } else {
     voiceBtn.disabled = true;
   }
-// Sidebar
+
+  document.addEventListener("click", (e) => {
+    if (!slashMenu.contains(e.target) && e.target !== input) {
+      slashMenu.classList.add("hidden");
+    }
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") slashMenu.classList.add("hidden");
+  });
+
+  // Sidebar
   toggleSidebar.addEventListener("click", () => {
     sidebar.classList.toggle("collapsed");
   });
@@ -451,88 +795,70 @@ document.addEventListener("DOMContentLoaded", () => {
     closeAllChatMenus();
   });
 
-// New chat button
+  // New chat button
   newChatBtn.addEventListener("click", () => {
     startNewChat();
   });
 
-// Saved messages button
-// Saved messages are stored separately in localStorage under
+  // Saved messages button
   savedMsgBtn.addEventListener("click", () => {
     currentView = "saved";
 
-  const savedMessages = JSON.parse(localStorage.getItem("savedMessages")) || [];
+    const savedMessages = JSON.parse(localStorage.getItem("savedMessages")) || [];
 
-  if (savedMessages.length === 0) {
+    if (savedMessages.length === 0) {
+      chatbox.innerHTML = `
+        <div class="bot message">
+          <div class="msg-avatar aura-orb" aria-hidden="true"></div>
+          <div class="bubble">
+            <strong>No saved messages yet.</strong>
+          </div>
+        </div>
+      `;
+      return;
+    }
     chatbox.innerHTML = `
       <div class="bot message">
-        <div class="bubble">
-          <strong>No saved messages yet.</strong>
-        </div>
+        <div class="msg-avatar aura-orb" aria-hidden="true"></div>
+        <div class="bubble"><strong>Saved messages</strong></div>
       </div>
     `;
-    return;
-  }
-  chatbox.innerHTML = `<div class="bot message"><div class="bubble"><strong>Saved messages</strong></div></div>`;
 
-  savedMessages.forEach((msg, index) => {
-    const date = new Date(msg.savedAt).toLocaleString();
+    savedMessages.forEach((msg, index) => {
+      const date = new Date(msg.savedAt).toLocaleString();
 
-    const msgDiv = document.createElement("div");
-    msgDiv.className = "saved-item";
+      const msgDiv = document.createElement("div");
+      msgDiv.className = "saved-item";
 
-    msgDiv.innerHTML = `
-      <div class="bot message">
-        <div class="bubble">
-          <div class="saved-top" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; opacity:0.6; font-size:12px;">
-            <small>📅 ${date}</small>
-            <span class="delete-btn" data-index="${index}">Delete</span>
+      msgDiv.innerHTML = `
+        <div class="bot message">
+          <div class="msg-avatar aura-orb" aria-hidden="true"></div>
+          <div class="bubble">
+            <div class="saved-top" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; opacity:0.6; font-size:12px;">
+              <small>📅 ${date}</small>
+              <span class="delete-btn" data-index="${index}">Delete</span>
+            </div>
+            ${marked.parse(msg.text)}
           </div>
-          ${marked.parse(msg.text)}
         </div>
-      </div>
-    `;
+      `;
 
-    chatbox.appendChild(msgDiv);
-  });
-  // delete functionality
-  document.querySelectorAll(".delete-btn").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      const index = e.target.dataset.index;
-      deleteSavedMessage(index);
+      chatbox.appendChild(msgDiv);
+    });
+
+    document.querySelectorAll(".delete-btn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const index = e.target.dataset.index;
+        deleteSavedMessage(index);
+      });
     });
   });
-});
 
-function saveMessage(text) {
-  const savedMessages = JSON.parse(localStorage.getItem("savedMessages")) || [];
-
-  const newSavedMessage = {
-    text,
-    savedAt: new Date().toISOString()
-  };
-
-  savedMessages.push(newSavedMessage);
-  localStorage.setItem("savedMessages", JSON.stringify(savedMessages));
-
-  alert("Message saved");
-}
-
-function deleteSavedMessage(index) {
-  const savedMessages = JSON.parse(localStorage.getItem("savedMessages")) || [];
-  savedMessages.splice(index, 1);
-  localStorage.setItem("savedMessages", JSON.stringify(savedMessages));
-
-  // refresh view
-  savedMsgBtn.click();
-}
-
-  // These functions update the sidebar to reflect whether a user
-  // is logged in or not. They don't handle authentication —
-  // that's done by the Google OAuth flow in index.html.
+  // These functions update the sidebar to reflect whether a user is logged in
   function setLoggedOutUI() {
     document.getElementById("userName").textContent = "Guest User";
     document.getElementById("userStatus").textContent = "Not connected";
+    document.getElementById("userAvatar").textContent = "👤";
     accountLoginBtn?.classList.remove("hidden");
     accountLogoutBtn?.classList.add("hidden");
     accountMenu?.classList.add("hidden");
@@ -541,11 +867,11 @@ function deleteSavedMessage(index) {
   function setLoggedInUI(name = "User") {
     document.getElementById("userName").textContent = name;
     document.getElementById("userStatus").textContent = "Connected";
+    document.getElementById("userAvatar").textContent = name.charAt(0).toUpperCase();
     accountLoginBtn?.classList.add("hidden");
     accountLogoutBtn?.classList.remove("hidden");
   }
 
-  // expose for index.html login callback
   window.__setLoggedInUI = setLoggedInUI;
 
   // Telegram
@@ -553,7 +879,6 @@ function deleteSavedMessage(index) {
     window.open("https://t.me/iokachat_bot", "_blank");
   });
 
-  // Open auth modal by clicking profile card
   userAccountBtn?.addEventListener("click", () => {
     authModal.classList.remove("hidden");
   });
@@ -562,25 +887,21 @@ function deleteSavedMessage(index) {
     authModal.classList.add("hidden");
   });
 
-  // Toggle bottom dropdown
   accountMenuBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
     accountMenu?.classList.toggle("hidden");
   });
 
-  // Login button inside dropdown
   accountLoginBtn?.addEventListener("click", () => {
     accountMenu?.classList.add("hidden");
     authModal.classList.remove("hidden");
   });
 
-  // Settings button placeholder
   accountSettingsBtn?.addEventListener("click", () => {
     accountMenu?.classList.add("hidden");
     alert("Settings panel will be added in the next step.");
   });
 
-  // Logout button inside dropdown
   accountLogoutBtn?.addEventListener("click", async () => {
     try {
       const res = await fetch("/logout", { method: "GET" });
@@ -595,7 +916,6 @@ function deleteSavedMessage(index) {
     }
   });
 
-  // Close dropdown when clicking outside
   document.addEventListener("click", (e) => {
     const clickedInsideMenu = accountMenu?.contains(e.target);
     const clickedMenuButton = accountMenuBtn?.contains(e.target);
@@ -610,23 +930,19 @@ function deleteSavedMessage(index) {
     return status && status.textContent.trim().toLowerCase() === "connected";
   }
 
-  // OPEN GMAIL
   emailBtn?.addEventListener("click", () => {
     if (!isUserConnected()) {
       authModal.classList.remove("hidden");
       return;
     }
-
     window.open("https://mail.google.com/mail/u/0/#inbox", "_blank", "noopener,noreferrer");
   });
 
-  // OPEN GOOGLE CALENDAR
   calendarBtn?.addEventListener("click", () => {
     if (!isUserConnected()) {
       authModal.classList.remove("hidden");
       return;
     }
-
     window.open("https://calendar.google.com/calendar/u/0/r", "_blank", "noopener,noreferrer");
   });
 
@@ -638,5 +954,24 @@ function deleteSavedMessage(index) {
   } else {
     startNewChat();
   }
-
 });
+
+function saveMessage(text) {
+  const savedMessages = JSON.parse(localStorage.getItem("savedMessages")) || [];
+
+  const newSavedMessage = {
+    text,
+    savedAt: new Date().toISOString()
+  };
+
+  savedMessages.push(newSavedMessage);
+  localStorage.setItem("savedMessages", JSON.stringify(savedMessages));
+}
+
+function deleteSavedMessage(index) {
+  const savedMessages = JSON.parse(localStorage.getItem("savedMessages")) || [];
+  savedMessages.splice(index, 1);
+  localStorage.setItem("savedMessages", JSON.stringify(savedMessages));
+
+  document.getElementById("savedMsgBtn").click();
+}

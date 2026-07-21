@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AURA</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style2.css') }}">
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/tokyo-night-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -16,16 +18,19 @@
     <!-- Main Chat Area -->
     <main class="chat-area">
       <header class="chat-header">
-        <h1>AURA</h1>
-        <button id="toggleSidebar" class="toggle-btn">☰</button>
+        <h1><span class="aura-orb header-orb" aria-hidden="true"></span> AURA</h1>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button id="voiceToggle" class="toggle-btn voice-toggle-btn" aria-label="Toggle voice replies" title="Toggle voice replies">🔊</button>
+          <button id="toggleSidebar" class="toggle-btn" aria-label="Toggle sidebar">☰</button>
+        </div>
       </header>
       <div id="chatbox" class="chatbox">
         <div class="bot message">
           <div id="greeting" class="greeting">
-            <div class="greeting-logo">✦</div>
+            <div class="aura-orb" aria-hidden="true"></div>
 
             <h2 class="greeting-title">How can I help you?</h2>
-            <p class="greeting-subtitle">Ask me anything — I’m here to assist.</p>
+            <p class="greeting-subtitle">Ask me anything — I'm here to assist.</p>
 
             <div class="greeting-cards">
               <button class="bubble" data-prompt="What is weather in ...">
@@ -39,25 +44,29 @@
         </div>
       </div>
       <button id="stopBtn" class="input-btn hidden" style="color: #f88;">✕</button>
+      <div id="attachmentPreview" class="attachment-preview hidden"></div>
+      <div id="slashMenu" class="slash-menu hidden"></div>
       <div class="input-area">
-        <button id="voice" class="input-btn">🎙️</button>
-        <input id="input" type="text" placeholder="Type your message..." autocomplete="off">
-        <button id="send" class="input-btn send-btn">➤</button>
+        <button id="attachBtn" class="input-btn" aria-label="Attach file" title="Attach a file or image">📎</button>
+        <input type="file" id="fileInput" accept="image/*,application/pdf,.txt,.csv,.md" class="hidden">
+        <button id="voice" class="input-btn" aria-label="Voice input">🎙️</button>
+        <input id="input" type="text" placeholder="Type your message, or / for commands..." autocomplete="off">
+        <button id="send" class="input-btn send-btn" aria-label="Send message">➤</button>
       </div>
       <div class="ai-disclaimer">
         Aura can make mistakes. Verify important information.
       </div>
     </main>
 
-    <aside id="sidebar" class="sidebar ">
+    <aside id="sidebar" class="sidebar">
 
       <div class="sidebar-header">
         <h2>Account</h2>
       </div>
-      
+
       <!-- User Account -->
       <div class="user-account" id="userAccountBtn">
-        <div class="avatar" id ="userAvatar">👤</div>
+        <div class="avatar" id="userAvatar">👤</div>
         <div class="user-info">
           <strong id="userName">Guest User</strong><br>
           <small id="userStatus">Not connected</small>
@@ -80,18 +89,17 @@
 
       <!-- Menu -->
       <div class="sidebar-menu">
-        <button id="newChatBtn"> New Chat</button>
-        <button id="savedMsgBtn"> Saved Messages</button>
-        <button id="calendarBtn">  Calendar </button>
-        <button id="emailBtn">  Email </button>
-        <button id="telegramBtn">  Telegram  </button>
+        <button id="newChatBtn">＋ New Chat</button>
+        <button id="savedMsgBtn">🔖 Saved Messages</button>
+        <button id="calendarBtn">📅 Calendar</button>
+        <button id="emailBtn">✉️ Email</button>
+        <button id="telegramBtn">✈️ Telegram</button>
       </div>
 
       <!-- Chat History Header -->
       <div class="chat-history-header">
         Chat History
       </div>
-
 
       <!-- Chat History List -->
       <ul id="chatHistory" class="chat-list">
@@ -102,55 +110,49 @@
   </div>
 
   <div id="authModal" class="auth-modal hidden">
-  <div class="auth-box">
-
-    <button id="closeAuth">✖</button>
-
-    <h2>Log In</h2>
-
-    <div id="g_id_signin" class="google-btn"></div>
-
+    <div class="auth-box">
+      <button id="closeAuth" aria-label="Close">✖</button>
+      <h2>Log In</h2>
+      <div id="g_id_signin" class="google-btn"></div>
+    </div>
   </div>
-</div>
-<script>
-  function handleCredentialResponse(response) {
-    // Send the Google JWT to your Flask backend
-    fetch('/auth/google', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credential: response.credential })
-    })
-    .then(res => res.json())
-    .then(data => {
-      if(data.success){
-        document.getElementById("authModal").classList.add("hidden");
-        if (window.__setLoggedInUI) {
-          window.__setLoggedInUI(data.name);
+
+  <script>
+    function handleCredentialResponse(response) {
+      fetch('/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          document.getElementById("authModal").classList.add("hidden");
+          if (window.__setLoggedInUI) {
+            window.__setLoggedInUI(data.name);
+          } else {
+            document.getElementById("userName").innerText = data.name;
+            document.getElementById("userStatus").innerText = "Connected";
+          }
         } else {
-          document.getElementById("userName").innerText = data.name;
-          document.getElementById("userStatus").innerText = "Connected";
+          alert("Google login failed");
         }
-        alert(`Logged in as ${data.name}`);
-      } else {
-        alert("Google login failed");
-      }
-    });
-  }
+      });
+    }
 
-  window.onload = function() {
-    google.accounts.id.initialize({
-      client_id: "317910301204-v7l5skkfrhsi6avhm7lugs2hjdv1il7d.apps.googleusercontent.com",
-      callback: handleCredentialResponse
-    });
+    window.onload = function () {
+      google.accounts.id.initialize({
+        client_id: "317910301204-v7l5skkfrhsi6avhm7lugs2hjdv1il7d.apps.googleusercontent.com",
+        callback: handleCredentialResponse
+      });
 
-    google.accounts.id.renderButton(
-      document.getElementById("g_id_signin"),
-      { theme: "outline", size: "large", width: 250 }
-    );
+      google.accounts.id.renderButton(
+        document.getElementById("g_id_signin"),
+        { theme: "outline", size: "large", width: 250 }
+      );
 
-    // Optional: auto prompt for Google login
-    google.accounts.id.prompt();
-  }
-</script>
+      google.accounts.id.prompt();
+    }
+  </script>
 </body>
 </html>
