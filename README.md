@@ -200,7 +200,7 @@ Open the following address in your browser:
 
 `http://127.0.0.1:5000`
 
-### 6. Run the Telegram bot (optional)
+### 6. Run the Telegram bot
 
 Open a second terminal, activate the virtual environment, and configure the Telegram bot token.
 
@@ -236,7 +236,7 @@ The project also includes a GitHub Actions workflow for automated checks.
 
 AURA is deployed as a web application on Render.
 
-**Live application:** [Open AURA](YOUR-RENDER-URL)
+**Live application:** [Open AURA](https://aura-ai-assistant-w2pw.onrender.com)
 
 The deployment uses Gunicorn to serve the Flask application. Required API credentials and secret configuration are supplied through Render environment variables rather than committed to source control.
 
