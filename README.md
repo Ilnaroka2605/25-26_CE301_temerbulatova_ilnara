@@ -1,5 +1,8 @@
 # AURA - Conversational AI Chatbot
 
+![CI](https://github.com/Ilnaroka2605/25-26_CE301_temerbulatova_ilnara/actions/workflows/ci.yml/badge.svg)
+
+
 A Flask-based conversational AI assistant ("AURA") powered by Google's Gemini model, with a web chat UI, Google OAuth login, weather and news lookups, and a companion Telegram bot.
 
 ## Features
