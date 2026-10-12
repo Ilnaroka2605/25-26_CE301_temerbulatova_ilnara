@@ -24,8 +24,6 @@ The project explores how a conversational AI model can be combined with external
 
 *An example conversation showing how AURA responds to a user prompt.*
 
-> Screenshots will appear here after adding the corresponding image files to `docs/images/`.
-
 ---
 
 ## Features
@@ -120,6 +118,8 @@ Conversation history is stored in browser `localStorage`. The Telegram bot sends
 │       └── script.js
 │
 ├── tests/
+│	└── test_app.py
+│
 ├── conftest.py
 │
 ├── .github/
